@@ -1,113 +1,316 @@
+"use client";
+import React, { useState, useEffect } from "react";
+import { OpenAI } from "openai";
+import { db, storage } from "@/firebase";
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  updateDoc,
+  doc,
+  onSnapshot,
+} from "firebase/firestore";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import {
+  Button,
+  TextField,
+  IconButton,
+  Card,
+  CardContent,
+  Typography,
+  Box,
+  Stack,
+  Modal,
+  Badge,
+} from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import RemoveIcon from "@mui/icons-material/Remove";
+import DeleteIcon from "@mui/icons-material/Delete";
 import Image from "next/image";
+import { fetchImageUrl } from "@/app/utils/duckduckgo";
+
+interface Food {
+  id: string;
+  name: string;
+  amount: number;
+  imageUrl: string;
+  category: string;
+}
 
 export default function Home() {
+  const [foods, setFoods] = useState<Food[]>([]);
+  const [newFood, setNewFood] = useState<string>("");
+  const [imageUrl, setImageUrl] = useState<string>("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [category, setCategory] = useState<string>("");
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [open, setOpen] = useState<boolean>(false);
+  const [searchTerm, setSearchTerm] = useState<string>("");
+
+  // Read data from Firestore
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "Food"), (snapshot) => {
+      const foodData = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Food[];
+      setFoods(foodData);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Upload image to Firebase Storage and get the download URL
+  const handleImageUpload = async (file: File) => {
+    const storageRef = ref(storage, `food-images/${file.name}`);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+
+    return new Promise<string>((resolve, reject) => {
+      uploadTask.on(
+        "state_changed",
+        (snapshot) => {
+          // You can monitor the upload progress here if needed
+        },
+        (error) => {
+          console.error("Image upload failed:", error);
+          reject(error);
+        },
+        async () => {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve(downloadURL);
+        }
+      );
+    });
+  };
+
+  // Categorize the food item using OpenAI GPT-4-o-mini model
+  const categorizeFood = async (imageUrl: string): Promise<string> => {
+    try {
+      const response = await fetch("/api/openai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ imageUrl }),
+      });
+
+      const data = await response.json();
+
+      console.log("data", data);
+
+      if (response.ok) {
+        return data.category;
+      } else {
+        console.error("Failed to categorize food:", data.error);
+        return "Unknown";
+      }
+    } catch (error) {
+      console.error("Failed to categorize food:", error);
+      return "Unknown";
+    }
+  };
+
+  // Add new food item
+  const handleAddFood = async () => {
+    let image = imageUrl.trim();
+    let foodCategory = category.trim();
+
+    if (imageFile) {
+      setUploading(true);
+      try {
+        image = await handleImageUpload(imageFile);
+      } catch (error) {
+        console.error("Failed to upload image:", error);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    } else if (!image) {
+      image = await fetchImageUrl(newFood);
+      setImageUrl(image || "");
+    }
+    if (!foodCategory && image) {
+      foodCategory = await categorizeFood(image);
+      setCategory(foodCategory);
+    }
+
+    if (newFood.trim() === "" || image === "") return;
+
+    await addDoc(collection(db, "Food"), {
+      name: newFood,
+      amount: 1,
+      imageUrl: image,
+      category: foodCategory,
+    });
+
+    setNewFood("");
+    setImageUrl("");
+    setImageFile(null);
+    setCategory("");
+    setOpen(false); // Close the modal after adding
+  };
+
+  // Update food amount
+  const handleUpdateFoodAmount = async (id: string, amount: number) => {
+    const foodDoc = doc(db, "Food", id);
+    await updateDoc(foodDoc, { amount });
+  };
+
+  // Delete food item
+  const handleDeleteFood = async (id: string) => {
+    const foodDoc = doc(db, "Food", id);
+    await deleteDoc(foodDoc);
+  };
+
+  // Filter foods based on search term
+  const filteredFoods = foods.filter((food) =>
+    food.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
-      </div>
-
-      <div className="relative z-[-1] flex place-items-center before:absolute before:h-[300px] before:w-full before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 sm:before:w-[480px] sm:after:w-[240px] before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
+    <Box
+      width={"100vw"}
+      height={"100vh"}
+      display={"flex"}
+      alignItems={"center"}
+      flexDirection={"column"}
+    >
+      <Stack spacing={2} width={"60vw"} alignItems={"center"}>
+        <Typography variant="h1">Sous</Typography>
+        <TextField
+          label="Search Foods"
+          variant="outlined"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
-      </div>
-
-      <div className="mb-32 grid text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={() => setOpen(true)}
         >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
+          Add Food
+        </Button>
+      </Stack>
+      <Stack
+        direction="row"
+        width={"100%"}
+        spacing={2}
+        justifyContent="center"
+        flexWrap={"wrap"}
+        style={{ marginTop: 20 }}
+      >
+        {filteredFoods.map((food) => (
+          <Card
+            key={food.id}
+            style={{
+              marginBottom: 10,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <CardContent style={{ textAlign: "center", padding: 10 }}>
+              {food.imageUrl && (
+                <Image
+                  src={food.imageUrl}
+                  alt={food.name}
+                  width={300}
+                  height={300}
+                  style={{ borderRadius: 8 }}
+                />
+              )}
+              <Stack
+                direction="row"
+                justifyContent="start"
+                alignItems="center"
+                spacing={2}
+                style={{ marginTop: 20, marginLeft: 20 }}
+              >
+                <Badge badgeContent={food.category} color="primary"></Badge>
+              </Stack>
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
+              <Typography variant="h5" margin={2}>
+                {food.name}
+              </Typography>
+              <Typography variant="body2">Amount: {food.amount}</Typography>
+              <IconButton
+                onClick={() => handleUpdateFoodAmount(food.id, food.amount + 1)}
+              >
+                <AddIcon />
+              </IconButton>
+              <IconButton
+                onClick={() =>
+                  food.amount > 1
+                    ? handleUpdateFoodAmount(food.id, food.amount - 1)
+                    : handleDeleteFood(food.id)
+                }
+              >
+                <RemoveIcon />
+              </IconButton>
+              <IconButton onClick={() => handleDeleteFood(food.id)}>
+                <DeleteIcon />
+              </IconButton>
+            </CardContent>
+          </Card>
+        ))}
+      </Stack>
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
+      {/* Modal for adding new food */}
+      <Modal open={open} onClose={() => setOpen(false)}>
+        <Box
+          display={"flex"}
+          flexDirection={"column"}
+          alignItems={"center"}
+          justifyContent={"center"}
+          bgcolor={"white"}
+          p={4}
+          m={"auto"}
+          width={"300px"}
+          borderRadius={"8px"}
+          boxShadow={3}
+          position={"relative"}
+          top={"20%"}
+          sx={{
+            transform: "translateY(-50%)",
+          }}
         >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-balance text-sm opacity-50">
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
+          <Typography variant="h5">Add Food Item</Typography>
+          <TextField
+            label="Food Name"
+            variant="outlined"
+            value={newFood}
+            onChange={(e) => setNewFood(e.target.value)}
+            style={{ marginTop: 20, marginBottom: 20 }}
+          />
+          <TextField
+            label="Image URL (optional)"
+            variant="outlined"
+            value={imageUrl || imageFile?.name || ""}
+            onChange={(e) => setImageUrl(e.target.value)}
+            style={{ marginBottom: 20 }}
+          />
+          <Button
+            variant="contained"
+            component="label"
+            style={{ marginBottom: 20 }}
+          >
+            Upload Image
+            <input
+              type="file"
+              hidden
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  setImageFile(e.target.files[0]);
+                  setImageUrl(""); // Clear the URL if an image file is selected
+                }
+              }}
+            />
+          </Button>
+          {uploading && <Typography>Uploading image...</Typography>}
+          <Button variant="contained" color="primary" onClick={handleAddFood}>
+            Add Food
+          </Button>
+        </Box>
+      </Modal>
+    </Box>
   );
 }
