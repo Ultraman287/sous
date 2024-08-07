@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { OpenAI } from "openai";
-import { db, storage } from "@/firebase";
+import { db, storage } from "@/app/firebase";
 import {
   collection,
   addDoc,
